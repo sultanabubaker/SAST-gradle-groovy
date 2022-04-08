@@ -1,0 +1,81 @@
+apply from: '../common.gradle'
+
+def nunitZip = file("$buildDir/nunit.zip")
+def nunitDir = project.hasProperty('nunitDir') ? project.property('nunitDir') : file("$buildDir/nunit")
+def nunitBinDir = file("$nunitDir/bin")
+
+task downloadLatest <<{
+
+	nunitZip.parentFile.mkdirs()
+
+	def latestUrl = new URL('http://sourceforge.net/projects/nunit/files/latest/download')
+	nunitZip.bytes = latestUrl.bytes
+
+}
+downloadLatest.onlyIf {
+	!nunitZip.exists()
+}
+
+task extractLatest(type: Copy, dependsOn: downloadLatest) {
+	from(zipTree(nunitZip)) {
+		eachFile {
+			// remove first segment (NUnit-2.6.1, for instance)
+			// so all files end up directly in $nunitDir
+			it.path = it.relativePath.segments[1..-1].join('/')
+		}
+	}
+	into nunitDir
+	include "NUnit-*/bin/**"
+}
+
+task captureVersion <<{
+	project.version = captureNUnitVersionOf("$nunitBinDir/nunit-console.exe")
+	subprojects { subProject ->
+		subProject.version = parent.version
+	}
+}
+
+def captureNUnitVersionOf(executable) {
+	def process = "mono $executable".execute()
+	process.waitFor()
+	def output = process.inputStream.text
+
+	def logoPattern = ~/NUnit-Console\s+version\s+((\d|\.)+)/
+
+	def matches = logoPattern.matcher(output).collect { it[1] }
+	assert matches.size() > 0, "Failed to capture NUnit version"
+	matches.first()
+}
+
+allprojects {
+
+	apply plugin: 'base'
+
+	group = 'nunit'
+
+	task zip(type: Zip) {
+		from file((project.name in ['nunit.framework', 'nunit-console']) ? nunitBinDir : "$nunitBinDir/lib")
+		include "${project.name}.exe"
+		include "${project.name}.dll"
+		include "${project.name}.xml"
+	}
+
+	uploadDefault {
+		repositories {
+			ivy { url repositoryForPublishing }
+		}
+	}
+
+	task publish(dependsOn: [extractLatest, captureVersion, uploadDefault])
+
+	artifacts {
+		'default' zip
+	}
+}
+
+dependencies {
+	subprojects.each { subProject ->
+		'default' project(subProject.path)
+	}
+}
+

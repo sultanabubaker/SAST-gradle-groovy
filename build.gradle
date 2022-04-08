@@ -1,0 +1,71 @@
+version = '0.3.5'
+
+allprojects {
+	apply plugin: 'idea'
+	apply plugin: 'eclipse'
+	apply plugin: 'base'
+
+	group = 'kaizen'
+
+	uploadArchives {
+		repositories {
+			ivy { url rootProject.file('../repository') }
+		}
+	}
+
+	repositories {
+		mavenCentral()
+	}
+}
+
+subprojects {
+	apply plugin: 'groovy'
+
+	dependencies {
+		compile gradleApi()
+		groovy localGroovy()
+		def spockframework = 'org.spockframework:spock-core:0.7-groovy-1.8'
+		if (project.name == 'testing') {
+			compile spockframework
+		} else {
+			testCompile project(':testing')
+		}
+		testCompile spockframework
+		testRuntime "cglib:cglib-nodep:2.2"     // enables mocking of classes (in addition to interfaces)
+	}
+
+	task publish(dependsOn: [test, uploadArchives])
+}
+
+dependencies {
+	subprojects.findAll { it.name != 'testing' }.each {
+		'default' project(path: it.path)
+	}
+}
+
+task publish(dependsOn: uploadArchives)
+
+task unityPackage <<{
+
+	def unityExecutable = project.hasProperty('unityExecutable') ?
+		project.property('unityExecutable') :
+		'/Applications/Unity/Unity.app/Contents/MacOS/Unity'
+
+	def logFile = file("$buildDir/unityPackage.log")
+	logFile.parentFile.mkdirs()
+
+	project.exec {
+		commandLine unityExecutable
+		args '-batchMode'
+		args '-quit'
+		args '-projectPath'
+		args file('templates/kaizen.unityPackage')
+		args '-exportPackage'
+		args 'Assets/kaizen'
+		args file("$buildDir/kaizen.unityPackage")
+		args '-cleanedLogFile'
+		args logFile
+	}
+	println logFile.text
+}
+

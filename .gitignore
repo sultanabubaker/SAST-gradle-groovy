@@ -1,0 +1,11 @@
+bin
+obj
+build
+out
+libs
+.gradle
+*.iml
+*.ipr
+*.iws
+*~
+.DS_Store

@@ -1,0 +1,106 @@
+apply plugin: 'base'
+apply from: '../common.gradle'
+
+if (!hasProperty('unityExecutable'))
+	ext { unityExecutable = '/Applications/Unity/Unity.app/Contents/MacOS/Unity' }
+
+def unityProject = file("$buildDir/project")
+
+def scriptFile = new File(unityProject, 'Assets/Editor/UnityVersionAndAssemblyInformationProbe.js')
+scriptFile.parentFile.mkdirs()
+scriptFile.text = '''
+import System.Linq;
+import System.IO;
+
+static function Probe() {
+	LogParenthesizedValue(Path.GetDirectoryName(typeof(UnityEngine.Object).Assembly.Location));
+
+	LogParenthesizedValue(Application.unityVersion);
+
+	var editorReferences = typeof(UnityEditor.EditorApplication).Assembly.GetReferencedAssemblies();
+	//for (var editorRef in editorReferences) Log(editorRef);
+	var nrefactory = editorReferences.Single(function(assemblyName) { return assemblyName.Name == 'ICSharpCode.NRefactory'; });
+	LogParenthesizedValue(nrefactory.Version);
+}
+
+static function LogParenthesizedValue(o) {
+	Debug.Log("(" + o + ")");
+}
+'''
+
+def logFile = file("$buildDir/unityLog.txt")
+
+project.exec {
+	commandLine unityExecutable
+	args '-batchMode'
+	args '-quit'
+	args '-projectPath'
+	args unityProject
+	args '-executeMethod'
+	args 'UnityVersionAndAssemblyInformationProbe.Probe'
+	args '-cleanedLogFile'
+	args logFile
+}
+
+def parenthesizedValuePattern = ~/\((.+?)\)/
+def log = logFile.text
+def parenthesizedValues = parenthesizedValuePattern.matcher(log).collect { it[1] }
+
+def unityLibsDir = parenthesizedValues[0]
+def unityVersion = parenthesizedValues[1]
+def nrefactoryVersion = parenthesizedValues[2];
+
+subprojects {
+
+	group = 'Unity'
+
+	configurations {
+		editor
+	}
+
+	apply plugin: 'base'
+
+	task publish(dependsOn: uploadEditor)
+
+	task zip(type: Zip) {
+		from unityLibsDir
+		include "${project.name}.dll"
+	}
+
+	artifacts {
+		editor zip
+	}
+
+	tasks.uploadEditor {
+		repositories {
+			ivy { url repositoryForPublishing }
+		}
+	}
+}
+
+configurations {
+	editor
+}
+
+dependencies {
+	subprojects.each {
+		editor project(path: it.path, configuration: 'editor')
+	}
+}
+
+project(':UnityEngine') {
+	version = unityVersion
+}
+
+project(':UnityEditor') {
+	version = unityVersion
+	dependencies {
+		[':UnityEngine', ':ICSharpCode.NRefactory'].each {
+			editor project(path: it, configuration: 'editor')
+		}
+	}
+}
+
+project(':ICSharpCode.NRefactory') {
+	version = nrefactoryVersion
+}
